@@ -8,14 +8,8 @@
 		float v2;
 		int v3;
 	}struct_loopback_mode;
-
-	typedef union
-	{
-		struct_loopback_mode s;
-		uint8_t packages[sizeof(struct_loopback_mode)];
-	}union_loopback_mode;
 	
-	union_loopback_mode board_1_data, board_2_data;
+	struct_loopback_mode board_1_data, board_2_data;
 	
 #endif
 
@@ -46,13 +40,13 @@ CanMvs::CanMvs(void)
 	
 #ifdef CAN_MVS_LOOPBACK_MODE
 	
-	board_1_data.s.v1 = 372;
-	board_1_data.s.v2 = 7.5f;
-	board_1_data.s.v3 = -32;
+	board_1_data.v1 = 372;
+	board_1_data.v2 = 7.5f;
+	board_1_data.v3 = -32;
 
-	board_2_data.s.v1 = 0;
-	board_2_data.s.v2 = 0;
-	board_2_data.s.v3 = 0;
+	board_2_data.v1 = 0;
+	board_2_data.v2 = 0;
+	board_2_data.v3 = 0;
 
 #endif
 	
@@ -142,6 +136,9 @@ CAN_MVS_status CanMvs::start_shipping(CAN_MVS_struct_id id)
 		return CAN_MVS_BUSY;
 	}
 
+	uint16_t struct_size;
+	uint8_t* ptr_choosen_struct;
+	
 #ifndef CAN_MVS_LOOPBACK_MODE
 
 	if(ptr_structs[id] == NULL)
@@ -149,20 +146,32 @@ CAN_MVS_status CanMvs::start_shipping(CAN_MVS_struct_id id)
 		return CAN_MVS_NULL_POINTER;
 	}
 
-	id_shipping_struct = id;
-	ptr_struct_to_send = ptr_structs[id];
-	max_sendable_bytes = size_of_structs[id];
+	struct_size = size_of_structs[id];
+	ptr_choosen_struct = ptr_structs[id];
 
 #else
 
-	id_shipping_struct = id;
-	ptr_struct_to_send = &board_1_data.packages[0];
-	max_sendable_bytes = sizeof(board_1_data);
+	struct_size = sizeof(board_1_data);
+	ptr_choosen_struct = (uint8_t*)&board_1_data;
 
 #endif
+	
+	ptr_struct_to_send = (uint8_t*) malloc(struct_size);
+	
+	if(ptr_struct_to_send == NULL)
+	{
+		return CAN_MVS_ERROR;
+	}
 
-	sent_header = false;
+	memcpy(ptr_struct_to_send, ptr_choosen_struct, struct_size);
+
+	ptr_struct_to_send_bytes = ptr_struct_to_send;
+
+	max_sendable_bytes = struct_size;
 	count_sent_bytes = 0;
+	
+	id_shipping_struct = id;
+	sent_header = false;
 
 	return CAN_MVS_OK;
 }
@@ -231,13 +240,15 @@ CAN_MVS_status CanMvs::send_header(void)
 void CanMvs::prepare_package(void)
 {
 	/* first byte is reserved*/
-	for(int i = 0; i < 7; i++)
+	for(int i = 1; i < 8; i++)
 	{
-		TxData[(i+1)] = *ptr_struct_to_send;
+		TxData[i] = *ptr_struct_to_send_bytes;
 		count_sent_bytes++;
-		ptr_struct_to_send++;
+		ptr_struct_to_send_bytes++;
 
-		if(was_all_pending_data_sent()){
+		if(was_all_pending_data_sent())
+		{
+			free(ptr_struct_to_send); //do not remove
 			break;
 		}
 	}
@@ -278,36 +289,74 @@ void CanMvs::process_received_package(void)
 
 CAN_MVS_status CanMvs::start_receiving(CAN_MVS_struct_id id)
 {
-
+	uint16_t struct_size;
+	uint8_t* ptr_choosen_struct;
+	
 #ifndef CAN_MVS_LOOPBACK_MODE
 
-	ptr_struct_to_receive = ptr_structs[id];
-	max_receivable_bytes = size_of_structs[id];
+	struct_size = size_of_structs[id];
+	ptr_choosen_struct = ptr_structs[id];
 
 #else
 
-	ptr_struct_to_receive = &board_2_data.packages[0];
-	max_receivable_bytes = sizeof(board_2_data);
+	struct_size = sizeof(board_2_data);
+	ptr_choosen_struct = (uint8_t*)&board_2_data;
 
 #endif
 
+	ptr_struct_to_receive = (uint8_t*) malloc(struct_size);
+	
+	if(ptr_struct_to_receive == NULL)
+	{
+		return CAN_MVS_ERROR;
+	}
+
+	memcpy(ptr_struct_to_receive, ptr_choosen_struct, struct_size);
+
+	ptr_struct_to_receive_bytes = ptr_struct_to_receive;
+	
+	id_receipt_struct = id;
+	max_receivable_bytes = struct_size;
 	count_received_bytes = 0;
 
 	return CAN_MVS_OK;
 }
 
+void CanMvs::copy_built_struct_to_destiny(void)
+{
+	uint8_t* ptr_destiny; 
+
+#ifndef CAN_MVS_LOOPBACK_MODE
+
+	ptr_destiny = ptr_structs[id_receipt_struct];
+
+#else
+
+	ptr_destiny = (uint8_t*)&board_2_data;
+
+#endif
+
+	memcpy(
+		ptr_destiny,
+		ptr_struct_to_receive,
+		max_receivable_bytes
+	);
+}
+
 void CanMvs::unload_received_package(void)
 {
+	/* first byte is reserved*/
+	for(int i = 1; i < 8; i++)
 	{
-		for(int i = 0; i < 7; i++)
-		{
-			*ptr_struct_to_receive = RxData[i+1];
-			count_received_bytes++;
-			ptr_struct_to_receive++;
+		*ptr_struct_to_receive_bytes = RxData[i];
+		count_received_bytes++;
+		ptr_struct_to_receive_bytes++;
 
-			if(was_all_pending_data_received()){
-				break;
-			}
+		if(was_all_pending_data_received())
+		{
+			copy_built_struct_to_destiny();
+			free(ptr_struct_to_receive); //do not remove
+			break;
 		}
 	}
 }
