@@ -131,7 +131,7 @@ void CanMvs::receive_data_callback(void)
 
 CAN_MVS_status CanMvs::start_shipping(CAN_MVS_struct_id id)
 {
-	if(!was_all_pending_data_sent())
+	if(!was_all_pending_data_sent() || am_i_receiving_this_id(id))
 	{
 		return CAN_MVS_BUSY;
 	}
@@ -177,6 +177,15 @@ CAN_MVS_status CanMvs::start_shipping(CAN_MVS_struct_id id)
 }
 
 /* End of public methods ------------------------------------ */
+
+bool CanMvs::am_i_receiving_this_id(CAN_MVS_struct_id id)
+{
+	if((id == id_receipt_struct) && !was_all_pending_data_received())
+	{
+		return true;
+	}
+	return false;
+}
 
 bool CanMvs::is_rxdata_header(void)
 {

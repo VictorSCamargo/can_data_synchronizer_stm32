@@ -64,7 +64,6 @@
 
 #include <stdlib.h>
 #include <string.h>
-#include "stm32f1xx_hal.h"
 
 /* open and edit this one */
 #include "can_mvs_config.h"
@@ -153,6 +152,7 @@
 		bool was_all_pending_data_received(void);
 		bool is_struct_id_valid(CAN_MVS_struct_id);
 		bool is_rxdata_header(void);
+		bool am_i_receiving_this_id(CAN_MVS_struct_id);
 	};
 	
 #ifdef __cplusplus
